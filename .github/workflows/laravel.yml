@@ -1,0 +1,60 @@
+name: Run tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+
+    services:  # Optional: Database service container
+      mysql:
+        image: mysql:8.0  # Replace with your preferred version
+        env:
+          MYSQL_ROOT_PASSWORD: root  # Adjust credentials if needed
+          MYSQL_DATABASE: testing_db  # Name of your testing database
+        ports:
+          - 3306:3306  # Maps container port to runner machine port
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Cache dependencies
+        uses: actions/cache@v1
+        with:
+          path: ~/.composer/cache/files
+          key: dependencies-composer-${{ hashFiles('composer.json') }}
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: 8.1  # You can change the PHP version here
+          extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite
+
+      - name: Install Composer dependencies
+        run: composer install --prefer-dist --no-interaction --no-suggest
+
+      - name: Install NPM dependencies
+        run: npm install
+
+      - name: Compile assets
+        run: npm run build
+
+      - name: Wait for MySQL to be ready
+        run: |
+          while ! mysqladmin ping -h "mysql" -p"${{ secrets.MYSQL_ROOT_PASSWORD }}" &> /dev/null; do
+            sleep 5
+          done;
+
+      - name: Load environment variables  # Optional
+        run: |
+          composer dump-autoload
+          cp .env.example .env  # Assuming you have a .env.example file
+          php artisan dotenv:load --env=testing  # Load specific environment for testing
+
+      - name: Seed database (Optional)
+        run: |  # Adjust path based on your seed file location
+          cp database/seeds/*.php ./ && php artisan db:seed --class=MySeeder
+
+      - name: Execute tests
+        run: vendor/bin/phpunit --verbose
